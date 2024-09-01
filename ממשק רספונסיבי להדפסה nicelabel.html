@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ממשק הדפסה עם Loftware Cloud</title>
+    <style>body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f0f0f0;
+    }
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background-color: white;
+        padding: 20px;
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    h1, h2 {
+        color: #333;
+    }
+    button, .file-upload {
+        background-color: #4CAF50;
+        border: none;
+        color: white;
+        padding: 8px 16px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 14px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+    button:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+    }
+    select, input[type="text"], input[type="file"] {
+        padding: 6px;
+        margin: 4px 0;
+        display: inline-block;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-sizing: border-box;
+    }
+    
+    /* סגנון רספונסיבי לטבלאות */
+    .table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    th, td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+    }
+    
+    @media screen and (max-width: 600px) {
+        th, td {
+            padding: 6px 10px;
+            font-size: 14px;
+        }
+        
+        th {
+            background-color: #f8f8f8;
+            font-weight: bold;
+        }
+    }
+    
+    .file-upload-wrapper {
+        margin-top: 20px;
+        margin-bottom: 20px;
+    }
+    #uploadStatus {
+        margin-top: 10px;
+        font-weight: bold;
+    }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chosen/1.8.7/chosen.jquery.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chosen/1.8.7/chosen.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1>ממשק הדפסה עם BarTender</h1>
+
+        <div class="file-upload-wrapper">
+            <h2>העלאת קובץ להדפסה</h2>
+            <input type="file" id="fileUpload" accept=".csv, .xlsx, .xls" onchange="handleFileUpload(this.files[0])">
+            <div id="uploadStatus"></div>
+        </div>
+
+        <div id="controls">
+            <h2>בחירת תבנית ושליטה בהדפסה</h2>
+            <select id="templateSelect">
+                <option value="">בחר תבנית</option>
+                <!-- תבניות יתווספו כאן דינמית -->
+            </select>
+            <button id="startPrint" onclick="startPrinting()">התחל הדפסה</button>
+            <button id="pausePrint" onclick="pausePrinting()" disabled>השהה הדפסה</button>
+            <button id="resumePrint" onclick="resumePrinting()" disabled>המשך הדפסה</button>
+            <button id="stopPrint" onclick="stopPrinting()" disabled>עצור הדפסה</button>
+            <button id="clearFilters" onclick="clearAllFilters()">בטל את כל הסינונים</button>
+        </div>
+
+        <div id="dataPreview">
+            <h2>תצוגה מקדימה של נתונים</h2>
+            <!-- עטיפה של הטבלה במיכל רספונסיבי -->
+            <div class="table-container">
+                <table id="previewTable">
+                    <!-- התוכן של הטבלה כאן -->
+                </table>
+            </div>
+        </div>
+
+        <div id="printStatus">
+            <h2>סטטוס הדפסה</h2>
+            <p>מדפיס שורה: <span id="currentRow">0</span> מתוך <span id="totalRows">0</span></p>
+            <p>סטטוס: <span id="status">מוכן</span></p>
+        </div>
+
+        <div id="printedRows">
+            <h2>שורות שהודפסו</h2>
+            <div class="table-container">
+                <table id="printedTable">
+                    <thead>
+                        <tr>
+                            <!-- הכותרות יתווספו כאן דינמית -->
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- שורות מודפסות יתווספו כאן דינמית -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script >
+let uploadedData = null;
+let templates = JSON.parse(localStorage.getItem('templates')) || [];
+
+// פונקציה לטיפול בהעלאת קובץ
+function handleFileUpload(file) {
+    if (!file) {
+        alert('אנא בחר קובץ להעלאה');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const data = event.target.result;
+        const workbook = XLSX.read(data, {type: 'binary'});
+
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(sheet, {header:1, raw: true, defval: ""});
+        displayData(json);
+        document.getElementById('uploadStatus').textContent = 'הקובץ הועלה בהצלחה';
+    };
+    reader.onerror = function(event) {
+        console.error("File could not be read! Code " + event.target.error.code);
+        document.getElementById('uploadStatus').textContent = 'שגיאה בהעלאת הקובץ';
+    };
+
+    reader.readAsBinaryString(file);
+}
+
+function displayData(data) {
+    uploadedData = data;
+    const table = document.getElementById('previewTable');
+    table.innerHTML = '';
+    const headers = data[0];
+    const headerRow = table.insertRow();
+    headers.forEach(header => {
+        const th = document.createElement('th');
+        th.textContent = header;
+        headerRow.appendChild(th);
+    });
+
+    data.slice(1).forEach(row => {
+        const tr = table.insertRow();
+        row.forEach(cell => {
+            const td = tr.insertCell();
+            td.textContent = cell !== null ? cell : "";
+        });
+    });
+
+    addFilterToTable(table, data);
+}
+
+function addFilterToTable(table, data) {
+    const headers = table.rows[0].cells;
+    for (let i = 0; i < headers.length; i++) {
+        const uniqueValues = [...new Set(data.slice(1).map(row => row[i]))].sort();
+        const select = document.createElement('select');
+        select.classList.add('chosen-select');
+        select.innerHTML = '<option value="">הצג הכל</option>' + uniqueValues.map(value => `<option value="${value}">${value}</option>`).join('');
+        select.setAttribute('onchange', 'filterTable(this, ' + i + ')');
+        headers[i].appendChild(select);
+    }
+    $(".chosen-select").chosen({width: "100%"});
+}
+
+function filterTable(select, columnIndex) {
+    const filter = select.value;
+    const table = document.getElementById('previewTable');
+    const rows = table.getElementsByTagName('tr');
+    for (let i = 1; i < rows.length; i++) {
+        const cell = rows[i].getElementsByTagName('td')[columnIndex];
+        if (cell) {
+            const txtValue = cell.textContent || cell.innerText;
+            rows[i].style.display = filter === "" || txtValue === filter ? '' : 'none';
+        }
+    }
+}
+
+function clearAllFilters() {
+    const table = document.getElementById('previewTable');
+    const selects = table.getElementsByTagName('select');
+    for (let i = 0; i < selects.length; i++) {
+        selects[i].selectedIndex = 0;
+        $(selects[i]).trigger("chosen:updated");
+    }
+    const rows = table.getElementsByTagName('tr');
+    for (let i = 1; i < rows.length; i++) {
+        rows[i].style.display = '';
+    }
+}
+
+async function startPrinting() {
+    const templateId = document.getElementById('templateSelect').value;
+    if (!templateId) {
+        alert('אנא בחר תבנית לפני התחלת ההדפסה');
+        return;
+    }
+    if (!uploadedData) {
+        alert('אנא העלה קובץ נתונים לפני התחלת ההדפסה');
+        return;
+    }
+
+    const previewTable = document.getElementById('previewTable');
+    const printedTable = document.getElementById('printedTable').getElementsByTagName('tbody')[0];
+
+    for (let i = previewTable.rows.length - 1; i > 0; i--) {
+        const row = previewTable.rows[i];
+        const rowData = Array.from(row.cells).map(cell => cell.textContent);
+
+        // שליחת הנתונים ל-Loftware Cloud
+        const response = await sendToLoftwareCloud(templateId, rowData);
+
+        if (response.success) {
+            moveRowToPrinted(row);
+            previewTable.deleteRow(i);
+        } else {
+            console.error("Error printing row:", response.error);
+            alert(`שגיאה בהדפסת שורה: ${response.error}`);
+        }
+    }
+}
+
+async function sendToLoftwareCloud(templateId, rowData) {
+    try {
+        const response = await fetch('https://api.loftware.com/v1/print', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer YOUR_API_KEY_HERE'
+            },
+            body: JSON.stringify({
+                templateId: templateId,
+                data: rowData
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('Error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+function moveRowToPrinted(row) {
+    const printedTable = document.getElementById('printedTable').getElementsByTagName('tbody')[0];
+    const newRow = printedTable.insertRow();
+    for (let i = 0; i < row.cells.length; i++) {
+        const newCell = newRow.insertCell();
+        newCell.textContent = row.cells[i].textContent;
+    }
+}
+
+function initPrintedTableHeaders(headers) {
+    const printedTable = document.getElementById('printedTable');
+    const headerRow = printedTable.insertRow();
+    headers.forEach(header => {
+        const th = document.createElement('th');
+        th.textContent = header;
+        headerRow.appendChild(th);
+    });
+}
+
+// Initializing the printed table with headers
+document.addEventListener("DOMContentLoaded", function() {
+    const previewTable = document.getElementById('previewTable');
+    const headers = Array.from(previewTable.rows[0].cells).map(cell => cell.textContent);
+    initPrintedTableHeaders(headers);
+});
+
+        </script>
+</body>
+</html>
